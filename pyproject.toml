@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mina_teleop"
+version = "0.1.0"
+description = "Teleoperation library for Mina — MediaPipe pose, IMU suit, LEAP Hand retargeting, data recording"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mina_teleop*"]
+zip-safe = false
