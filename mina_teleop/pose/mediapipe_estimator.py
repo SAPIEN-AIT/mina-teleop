@@ -1,8 +1,11 @@
-"""MediaPipe Pose wrapper for single-arm landmark extraction.
+"""MediaPipe Pose wrapper for arm landmark extraction.
 
-Runs camera capture and pose estimation in a background daemon thread.
-The main thread (sim loop) calls get_landmarks() non-blocking to read
-the latest available result.
+Two classes are provided:
+  - MediaPipeArmEstimator  — single arm (left or right)
+  - BimanualArmEstimator   — both arms extracted from ONE camera pass per frame
+
+Both run camera capture and pose estimation in a background daemon thread.
+The main thread (sim loop) calls get_landmarks() non-blocking.
 """
 
 from __future__ import annotations
@@ -191,3 +194,132 @@ class MediaPipeArmEstimator:
                     self._debug_frame = annotated
 
         cap.release()
+
+
+# ---------------------------------------------------------------------------
+# Bimanual data + estimator
+# ---------------------------------------------------------------------------
+
+@dataclass
+class BimanualArmLandmarks:
+    """Landmarks for both arms, extracted from a single MediaPipe inference."""
+    left:  ArmLandmarks
+    right: ArmLandmarks
+
+
+class BimanualArmEstimator:
+    """Extracts landmarks for BOTH arms from a single camera pass per frame.
+
+    More efficient than running two ``MediaPipeArmEstimator`` instances because
+    MediaPipe Pose already detects the full body in one inference call.
+
+    Parameters
+    ----------
+    camera_id:
+        OpenCV camera index (0 = default built-in webcam on Mac).
+    min_detection_confidence:
+        Passed to MediaPipe Pose.
+    min_tracking_confidence:
+        Passed to MediaPipe Pose.
+    """
+
+    def __init__(
+        self,
+        camera_id: int = 0,
+        min_detection_confidence: float = 0.7,
+        min_tracking_confidence: float = 0.7,
+    ) -> None:
+        self.camera_id       = camera_id
+        self._detection_conf = min_detection_confidence
+        self._tracking_conf  = min_tracking_confidence
+
+        self._lock       = threading.Lock()
+        self._landmarks: BimanualArmLandmarks | None = None
+
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    # ------------------------------------------------------------------
+    # Public interface
+    # ------------------------------------------------------------------
+
+    def start(self) -> None:
+        """Start the background camera + pose estimation thread."""
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        """Signal the background thread to stop and wait for it."""
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=3.0)
+
+    def get_landmarks(self) -> BimanualArmLandmarks | None:
+        """Return the most recent bimanual landmarks, or ``None`` if not ready."""
+        with self._lock:
+            return self._landmarks
+
+    # ------------------------------------------------------------------
+    # Background thread
+    # ------------------------------------------------------------------
+
+    def _run(self) -> None:
+        cap = cv2.VideoCapture(self.camera_id)
+        if not cap.isOpened():
+            raise RuntimeError(f"Cannot open camera {self.camera_id}")
+
+        mp_pose = mp.solutions.pose
+
+        with mp_pose.Pose(
+            min_detection_confidence=self._detection_conf,
+            min_tracking_confidence=self._tracking_conf,
+        ) as pose:
+            while not self._stop_event.is_set():
+                ret, frame = cap.read()
+                if not ret:
+                    continue
+
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                rgb.flags.writeable = False
+                results = pose.process(rgb)
+                rgb.flags.writeable = True
+
+                if results.pose_world_landmarks:
+                    lm = results.pose_world_landmarks.landmark
+
+                    left  = self._extract_arm(lm, "left")
+                    right = self._extract_arm(lm, "right")
+
+                    if left is not None and right is not None:
+                        with self._lock:
+                            self._landmarks = BimanualArmLandmarks(
+                                left=left, right=right
+                            )
+
+        cap.release()
+
+    @staticmethod
+    def _extract_arm(lm, side: str) -> ArmLandmarks | None:
+        ids = _LANDMARK_IDS[side]
+
+        def _get(key: str):
+            l = lm[ids[key]]
+            return np.array([l.x, l.y, l.z], dtype=np.float32), l.visibility
+
+        shoulder,          vis_s = _get("shoulder")
+        elbow,             vis_e = _get("elbow")
+        wrist,             vis_w = _get("wrist")
+        opposite_shoulder, _     = _get("opposite_shoulder")
+
+        min_vis = min(vis_s, vis_e, vis_w)
+        if min_vis < _MIN_VISIBILITY:
+            return None
+
+        return ArmLandmarks(
+            shoulder=shoulder,
+            elbow=elbow,
+            wrist=wrist,
+            opposite_shoulder=opposite_shoulder,
+            visibility=float(min_vis),
+        )

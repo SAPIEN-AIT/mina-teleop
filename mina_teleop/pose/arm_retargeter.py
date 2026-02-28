@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from mina_teleop.pose.mediapipe_estimator import ArmLandmarks
+from mina_teleop.pose.mediapipe_estimator import ArmLandmarks, BimanualArmLandmarks
 
 _EPS = 1e-6
 
@@ -135,3 +135,42 @@ class ArmRetargeter:
         # Angle between upper-arm and forearm vectors, measured from straight
         cos_angle = float(np.dot(-upper_arm, forearm))
         return float(np.pi) - _safe_acos(cos_angle)
+
+
+class BimanualRetargeter:
+    """Retargets both arms simultaneously, returning a full 10-DOF joint vector.
+
+    Internally wraps two ``ArmRetargeter`` instances (one per side).
+    Joint ordering matches ``ArmSim``:
+        [0:5]  left  arm — shoulder_pitch, roll, yaw, elbow_pitch, elbow_roll
+        [5:10] right arm — shoulder_pitch, roll, yaw, elbow_pitch, elbow_roll
+
+    Parameters
+    ----------
+    smoothing:
+        EMA smoothing applied to both arms.
+    """
+
+    NUM_JOINTS = 10
+
+    def __init__(self, smoothing: float = 0.7) -> None:
+        self._left  = ArmRetargeter(side="left",  smoothing=smoothing)
+        self._right = ArmRetargeter(side="right", smoothing=smoothing)
+
+    def calibrate(self, landmarks: BimanualArmLandmarks) -> None:
+        """Capture the current pose as neutral for both arms."""
+        self._left.calibrate(landmarks.left)
+        self._right.calibrate(landmarks.right)
+
+    def retarget(self, landmarks: BimanualArmLandmarks) -> np.ndarray:
+        """Return smoothed 10-DOF joint angles in radians.
+
+        Returns
+        -------
+        np.ndarray
+            Shape ``(10,)`` — left arm (0:5) then right arm (5:10).
+        """
+        targets = np.zeros(self.NUM_JOINTS, dtype=np.float32)
+        targets[:5]  = self._left.retarget(landmarks.left)
+        targets[5:]  = self._right.retarget(landmarks.right)
+        return targets
