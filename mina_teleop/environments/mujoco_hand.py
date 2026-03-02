@@ -41,13 +41,13 @@ from typing import Callable
 import mujoco
 import mujoco.viewer
 import numpy as np
+from mina_assets import LEAP_HAND_SCENE
 
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
 
-_REPO_ROOT   = Path(__file__).resolve().parents[4]  # Mina/
-_DEFAULT_SCENE = _REPO_ROOT / "mjcf" / "leap_hand" / "scene.xml"
+_DEFAULT_SCENE = LEAP_HAND_SCENE
 
 # ---------------------------------------------------------------------------
 # Number of LEAP finger actuators
