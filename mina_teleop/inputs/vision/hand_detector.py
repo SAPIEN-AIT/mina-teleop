@@ -120,6 +120,36 @@ class StereoHandDetector:
         right_lm = self._run(self._tracker_right, right_bgr)
         return StereoHandObservation(left_cam=left_lm, right_cam=right_lm)
 
+    def process_raw(
+        self,
+        left_bgr: np.ndarray,
+        right_bgr: np.ndarray,
+    ) -> tuple:
+        """Run detection and return raw MediaPipe result objects.
+
+        Unlike ``process()``, this returns the unstructured MediaPipe result
+        objects so callers can access ``.multi_hand_landmarks[0].landmark``
+        directly (needed by IKRetargeter.retarget() and palm_quat()) and pass
+        the result to ``draw_landmarks()`` for skeleton overlay.
+
+        Parameters
+        ----------
+        left_bgr, right_bgr:
+            BGR frames from the left and right cameras (H, W, 3).
+
+        Returns
+        -------
+        tuple[result_left, result_right]
+            Raw MediaPipe Hands result objects.  Either may be None if the
+            tracker returns no detection.  Check
+            ``result.multi_hand_landmarks`` before use.
+        """
+        left_rgb  = cv2.cvtColor(left_bgr,  cv2.COLOR_BGR2RGB)
+        right_rgb = cv2.cvtColor(right_bgr, cv2.COLOR_BGR2RGB)
+        result_l  = self._tracker_left.process(left_rgb)
+        result_r  = self._tracker_right.process(right_rgb)
+        return result_l, result_r
+
     def draw_landmarks(
         self,
         frame: np.ndarray,
