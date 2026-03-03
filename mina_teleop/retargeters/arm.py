@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from mina_teleop.pose.mediapipe_estimator import ArmLandmarks, BimanualArmLandmarks
+from mina_teleop.inputs.vision.mediapipe_engine import ArmLandmarks, BimanualArmLandmarks
 
 _EPS = 1e-6
 
